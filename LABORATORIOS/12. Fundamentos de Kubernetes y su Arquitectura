@@ -1,0 +1,295 @@
+# Laboratorio 12: Fundamentos de Kubernetes y su Arquitectura (Windows)
+
+> **Objetivo:** comprender los componentes principales de Kubernetes y validar su funcionamiento mediante un clúster local en **Windows** usando **Docker Desktop + Kubernetes** o **kind**.
+
+---
+
+## 1. Objetivos de aprendizaje
+
+Al finalizar este laboratorio serás capaz de:
+
+- Explicar la arquitectura de Kubernetes (Control Plane y Worker Nodes).
+- Identificar el rol de **etcd**, **kube-apiserver**, **kube-scheduler** y **kube-controller-manager**.
+- Identificar el rol de **kubelet**, **kube-proxy** y el plugin **CNI**.
+- Preparar un clúster local en Windows.
+- Usar `kubectl` para inspeccionar recursos, desplegar una app y depurar problemas.
+
+---
+
+## 2. Prerrequisitos (Windows)
+
+- **Windows 10/11** actualizado.
+- Permisos de administrador para instalar software.
+- **Docker Desktop** instalado.
+- Conexión a Internet.
+
+### 2.1 Recomendación: usar PowerShell
+
+Los comandos de este laboratorio están pensados para **PowerShell**.
+
+> Si usas Git Bash, WSL o CMD, algunos comandos (por ejemplo variables) pueden requerir ajustes.
+
+---
+
+## 3. Conceptos clave: arquitectura de Kubernetes
+
+Kubernetes se compone, a alto nivel, de:
+
+- **Control Plane** (plano de control): expone la API y coordina el clúster.
+- **Worker Nodes** (nodos de trabajo): ejecutan las cargas de trabajo (Pods).
+
+### 3.1 Componentes del Control Plane
+
+- **kube-apiserver**: puerta de entrada; valida y procesa peticiones a la API.
+- **etcd**: base de datos clave-valor con el estado del clúster.
+- **kube-scheduler**: asigna Pods pendientes a nodos.
+- **kube-controller-manager**: controladores que reconcilian estado deseado vs real.
+
+### 3.2 Componentes del Worker Node
+
+- **kubelet**: agente del nodo; asegura que los Pods se ejecutan.
+- **kube-proxy**: implementa conectividad de red para Services.
+- **Runtime (CRI)**: ejecuta contenedores (por ejemplo containerd).
+- **CNI**: plugin de red para conectar Pods.
+
+---
+
+## 4. Preparar un clúster local en Windows
+
+Tienes dos opciones. Elige **una**:
+
+### Opción A (fácil): Kubernetes de Docker Desktop
+
+1) Abre **Docker Desktop**.  
+2) Ve a **Settings** → **Kubernetes**.  
+3) Marca **Enable Kubernetes** y aplica.  
+4) Cuando termine, verifica en PowerShell:
+
+```powershell
+kubectl version --client
+kubectl cluster-info
+kubectl get nodes
+```
+
+> Si `kubectl` no está disponible, instala **kubectl** (ver Opción B o instala desde Chocolatey/Winget) y vuelve a ejecutar.
+
+### Opción B (recomendada para labs): kind (Kubernetes in Docker)
+
+1) Instala `kubectl` (una de estas opciones):
+
+- **Winget**:
+
+```powershell
+winget install Kubernetes.kubectl
+```
+
+- **Chocolatey** (si lo tienes):
+
+```powershell
+choco install kubernetes-cli -y
+```
+
+2) Instala **kind**:
+
+- **Winget**:
+
+```powershell
+winget install Kubernetes.kind
+```
+
+3) Crea el clúster:
+
+```powershell
+kind create cluster --name k8s-lab
+```
+
+4) Verifica:
+
+```powershell
+kubectl config current-context
+kubectl cluster-info
+kubectl get nodes -o wide
+```
+
+---
+
+## 5. Ejercicios prácticos con kubectl (PowerShell)
+
+> Consejo: si algo falla, revisa eventos:
+>
+> ```powershell
+> kubectl get events -A --sort-by=.metadata.creationTimestamp
+> ```
+
+### 5.1 Inspección del clúster
+
+```powershell
+kubectl get ns
+kubectl get pods -n kube-system -o wide
+kubectl get nodes -o wide
+```
+
+Identifica (según tu opción) componentes como CoreDNS, kube-proxy y el CNI.
+
+---
+
+### 5.2 Crear un namespace de trabajo
+
+```powershell
+kubectl create namespace lab-k8s
+kubectl config set-context --current --namespace=lab-k8s
+kubectl get all
+```
+
+---
+
+### 5.3 Desplegar una aplicación (Deployment)
+
+Crea un fichero `deployment.yaml` con este contenido:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-k8s
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hello-k8s
+  template:
+    metadata:
+      labels:
+        app: hello-k8s
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.27
+        ports:
+        - containerPort: 80
+```
+
+Aplica y verifica:
+
+```powershell
+kubectl apply -f .\deployment.yaml
+kubectl get deploy
+kubectl get rs
+kubectl get pods -o wide
+```
+
+---
+
+### 5.4 Exponer la aplicación (Service)
+
+Crea `service.yaml`:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-k8s-svc
+spec:
+  selector:
+    app: hello-k8s
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+  type: ClusterIP
+```
+
+Aplica y verifica:
+
+```powershell
+kubectl apply -f .\service.yaml
+kubectl get svc
+kubectl describe svc hello-k8s-svc
+kubectl get endpoints hello-k8s-svc
+```
+
+---
+
+### 5.5 Probar conectividad (port-forward)
+
+En una terminal:
+
+```powershell
+kubectl port-forward svc/hello-k8s-svc 8080:80
+```
+
+En otra terminal:
+
+```powershell
+curl http://localhost:8080
+```
+
+> En PowerShell, `curl` suele ser un alias de `Invoke-WebRequest`. Si quieres ver la respuesta en crudo:
+>
+> ```powershell
+> Invoke-WebRequest http://localhost:8080 -UseBasicParsing
+> ```
+
+---
+
+### 5.6 Logs y exec
+
+1) Obtén un Pod:
+
+```powershell
+$pod = kubectl get pods -l app=hello-k8s -o jsonpath="{.items[0].metadata.name}"
+$pod
+```
+
+2) Logs:
+
+```powershell
+kubectl logs $pod
+```
+
+3) Ejecuta un shell en el contenedor:
+
+```powershell
+kubectl exec -it $pod -- sh
+```
+
+Dentro del contenedor:
+
+```sh
+nginx -v
+exit
+```
+
+---
+
+### 5.7 Escalado (reconciliación)
+
+```powershell
+kubectl scale deploy hello-k8s --replicas=3
+kubectl get pods -l app=hello-k8s
+```
+
+---
+
+## 6. Preguntas de reflexión
+
+- ¿Qué componente decide en qué nodo se coloca un Pod?
+- ¿Qué guarda `etcd` y por qué es crítico?
+- ¿Por qué se recomienda usar un Deployment en lugar de crear Pods “a mano”?
+- ¿Qué relación hay entre Service, selector y Endpoints?
+
+---
+
+## 7. Limpieza
+
+Borra el namespace:
+
+```powershell
+kubectl delete namespace lab-k8s
+```
+
+Si usaste kind:
+
+```powershell
+kind delete cluster --name k8s-lab
+```
